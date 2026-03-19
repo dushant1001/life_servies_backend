@@ -13,10 +13,6 @@ class Document(Base):
     document_type = Column(String(100))   # aadhar, pan, license
     document_number = Column(String(100), nullable=True)
     file_url = Column(String(255))        # Supabase URL
-
-    status = Column(String(20), default="pending")  
-    # pending / approved / rejected
-
     uploaded_at = Column(DateTime, default=datetime.utcnow)
 
     userId = Column(Integer, ForeignKey("users.id"))

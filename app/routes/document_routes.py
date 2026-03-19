@@ -4,15 +4,18 @@ import uuid
 
 from app.core.security import get_current_user
 from app.dependencies.db import get_db
-from app.models.user_model import User
-from app.models.profile_document_model import Document
 from app.core.supabase import supabase
+from app.models.profile_document_model import Document
 
+
+# ==========================
+# ROUTER
+# ==========================
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
 
 # ==========================
-# UPLOAD DOCUMENT
+# UPLOAD DOCUMENT (ONLY SERVICE PROVIDER)
 # ==========================
 @router.post("/upload")
 def upload_document(
@@ -20,36 +23,39 @@ def upload_document(
     document_number: str = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
-
-    # 🔥 Only service provider allowed
+    # only service_provider allowed
     if current_user.role != "service_provider":
-        raise HTTPException(status_code=403, detail="Only service providers can upload documents")
+        raise HTTPException(
+            status_code=403,
+            detail="Only service providers can upload documents"
+        )
 
-    # file name
     ext = file.filename.split(".")[-1]
     filename = f"{uuid.uuid4()}.{ext}"
 
     file_bytes = file.file.read()
 
     try:
-        # ✅ upload
+        # upload to supabase
         supabase.storage.from_("user-photos").upload(
             path=f"documents/{filename}",
             file=file_bytes,
             file_options={"content-type": file.content_type},
         )
 
-        # ✅ get public url (same bucket + same path)
+        # get public url
         file_url = supabase.storage.from_("user-photos").get_public_url(
             f"documents/{filename}"
         )
 
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Upload failed: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload failed: {str(e)}"
+        )
 
-    # save in DB
     new_doc = Document(
         document_type=document_type,
         document_number=document_number,
@@ -67,21 +73,21 @@ def upload_document(
             "id": new_doc.id,
             "document_type": new_doc.document_type,
             "file_url": new_doc.file_url,
-            "status": new_doc.status,
         },
     }
 
 
 # ==========================
-# GET MY DOCUMENTS
+# GET MY DOCUMENTS (ANY USER)
 # ==========================
-@router.get("/get")
+@router.get("/my-documents")
 def get_my_documents(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
-
-    docs = db.query(Document).filter(Document.userId == current_user.id).all()
+    docs = db.query(Document).filter(
+        Document.userId == current_user.id
+    ).all()
 
     return {
         "documents": [
@@ -90,7 +96,6 @@ def get_my_documents(
                 "document_type": d.document_type,
                 "document_number": d.document_number,
                 "file_url": d.file_url,
-                "status": d.status,
             }
             for d in docs
         ]
@@ -98,22 +103,58 @@ def get_my_documents(
 
 
 # ==========================
-# DELETE DOCUMENT
+# CLIENT → VIEW PROVIDER DOCUMENTS
+# ==========================
+@router.get("/provider/{provider_id}")
+def get_provider_documents(
+    provider_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    # only client allowed
+    if current_user.role != "client":
+        raise HTTPException(
+            status_code=403,
+            detail="Only clients can view provider documents"
+        )
+
+    docs = db.query(Document).filter(
+        Document.userId == provider_id
+    ).all()
+
+    return {
+        "documents": [
+            {
+                "id": d.id,
+                "document_type": d.document_type,
+                "file_url": d.file_url,
+            }
+            for d in docs
+        ]
+    }
+
+
+# ==========================
+# DELETE DOCUMENT (ONLY OWNER)
 # ==========================
 @router.delete("/delete/{doc_id}")
 def delete_document(
     doc_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
-
     doc = db.query(Document).filter(
-        Document.id == doc_id,
-        Document.userId == current_user.id
+        Document.id == doc_id
     ).first()
 
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    if doc.userId != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized"
+        )
 
     db.delete(doc)
     db.commit()

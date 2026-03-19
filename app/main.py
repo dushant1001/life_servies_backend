@@ -8,7 +8,7 @@ from app.routes.document_routes import router as document_router
 from app.routes.application_routes import router as application_router
 
 from app.db.database import Base, engine
-from app.models import user_model
+from app.models import application_model, profile_document_model, user_model
 
 app = FastAPI()
 
